@@ -7,3 +7,5 @@ It has the following webhooks:
 * http://pe.qlik.com:8083/clear which clears all selections
 
 all calls are POST
+
+_You'll need to supply your own client and client key pem files_
