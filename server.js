@@ -41,9 +41,15 @@ ExpressApp.post('/clear', urlencodedParser, function (req, res) {
     res.end("cleared");
 });
 
+// Test
+ExpressApp.get('/test', function (req, res) {
+    console.log("TEST");
+    res.end("test");
+});
+
 
 // Start Server
-var server = ExpressApp.listen(8083, '10.150.143.37', 511, function () {
+var server = ExpressApp.listen(8083, '172.100.19.130', 511, function () {
   var host = server.address().address;
   var port = server.address().port;
 
@@ -52,13 +58,32 @@ var server = ExpressApp.listen(8083, '10.150.143.37', 511, function () {
 });
 
 
-/**** Connect to Qlik App ****/
-var config = {
-    host: 'pe.qlik.com',
+/**** Connect to Qlik App via Virtual Proxy ****/
+// var config = {
+//     host: 'rdmobile.qlikemm.com',
+//     isSecure: true,
+//     origin: 'localhost',
+//     rejectUnauthorized: true,
+//     appname: '06f6fb54-1ee0-4903-a69d-9f85e663084d' // Retail
+// };
+
+
+/**** Connect to Qlik App via Proxy using certificates ****/
+const client = fs.readFileSync('client.pem');
+const client_key = fs.readFileSync('client_key.pem');
+
+const config = {
+    host: 'localhost',
+    port: 4747, // Standard Engine port
     isSecure: true,
-    origin: 'http://localhost',
-    // appname: '706c1a47-18d8-4e34-b58d-b71039c502fe' // Healthcare
-    appname: 'a1329a13-104e-442b-a34a-06f2aa484e4d' // Retail
+    headers: {
+        'X-Qlik-User': 'UserDirectory=Internal;UserId=sa_repository' // Passing a user to QIX to authenticate as
+    },
+    key: client_key,
+    cert: client,
+    rejectUnauthorized: false, // Don't reject self-signed certs
+    appname: '06f6fb54-1ee0-4903-a69d-9f85e663084d' // Retail
+
 };
 
 qsocks.ConnectOpenApp(config).then(function(connections) {
