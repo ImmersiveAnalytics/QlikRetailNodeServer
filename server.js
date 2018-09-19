@@ -5,9 +5,10 @@ var bodyParser = require('body-parser');
 var fs = require("fs");
 
 var Products = {};
+var SalesDates = {};
 var global, senseApp, fields = {};
 fields["ShelfNum"] = {};
-fields["ShelfLoc"] = {};
+fields["ProductName"] = {};
 
 /**** Create Web Server to handle requests to/from Unity ****/
 var urlencodedParser = bodyParser.urlencoded({ extended: false });
@@ -17,6 +18,12 @@ ExpressApp.post('/listProducts', urlencodedParser, function (req, res) {
    // console.log( Products );
    console.log("listing " + Object.keys(Products).length + " Products");
    res.end(JSON.stringify(Products));
+});
+
+// Get projects by date
+ExpressApp.post('/getSalesDates', urlencodedParser, function (req, res) {
+   console.log("listing " + Object.keys(SalesDates).length + " SalesDates");
+   res.end(JSON.stringify(SalesDates));
 });
 
 // Get field states
@@ -49,7 +56,8 @@ ExpressApp.get('/test', function (req, res) {
 
 
 // Start Server
-var server = ExpressApp.listen(8083, '172.100.19.130', 511, function () {
+//var server = ExpressApp.listen(8083, '172.100.19.130', 511, function () { //rdmobile
+var server = ExpressApp.listen(8083, '10.150.143.37', 511, function () {
   var host = server.address().address;
   var port = server.address().port;
 
@@ -67,31 +75,40 @@ var server = ExpressApp.listen(8083, '172.100.19.130', 511, function () {
 //     appname: '06f6fb54-1ee0-4903-a69d-9f85e663084d' // Retail
 // };
 
-
-/**** Connect to Qlik App via Proxy using certificates ****/
-const client = fs.readFileSync('client.pem');
-const client_key = fs.readFileSync('client_key.pem');
-
-const config = {
-    host: 'localhost',
-    port: 4747, // Standard Engine port
+/**** Connect to Qlik App via Virtual Proxy ****/
+var config = {
+    host: 'pe.qlik.com',
     isSecure: true,
-    headers: {
-        'X-Qlik-User': 'UserDirectory=Internal;UserId=sa_repository' // Passing a user to QIX to authenticate as
-    },
-    key: client_key,
-    cert: client,
-    rejectUnauthorized: false, // Don't reject self-signed certs
-    appname: '06f6fb54-1ee0-4903-a69d-9f85e663084d' // Retail
-
+    origin: 'http://localhost',
+    // rejectUnauthorized: true,
+    appname: '8eb18ccb-41c8-4cdc-a142-d34bf682e675' // Retail
 };
+
+
+// /**** Connect to Qlik App via Proxy using certificates ****/
+// const client = fs.readFileSync('client.pem');
+// const client_key = fs.readFileSync('client_key.pem');
+
+// const config = {
+//     host: 'localhost',
+//     port: 4747, // Standard Engine port
+//     isSecure: true,
+//     headers: {
+//         'X-Qlik-User': 'UserDirectory=Internal;UserId=sa_repository' // Passing a user to QIX to authenticate as
+//     },
+//     key: client_key,
+//     cert: client,
+//     rejectUnauthorized: false, // Don't reject self-signed certs
+//     appname: '0259c145-036e-4ee6-b332-1a4dde01eeb2' // Old Product Affinity app: 06f6fb54-1ee0-4903-a69d-9f85e663084d
+
+// };
 
 qsocks.ConnectOpenApp(config).then(function(connections) {
 	global	= connections[0];
 	senseApp= connections[1];
     console.log("got senseApp");
 
-    // Sankey Cube
+    // Product Affinity + Inventory
     senseApp.createSessionObject({
         "qInfo": {
             "qType": 'myProjectCube'
@@ -118,8 +135,8 @@ qsocks.ConnectOpenApp(config).then(function(connections) {
 			"qMeasures": [
                 {
                     qDef: {
-                        qLabel: 'Sales',
-                        qDef: '=Sum([Sales TY])'
+                        qLabel: 'Inventory',
+                        qDef: '=Avg(Inventory)'
                     },
                     qSortBy: {qSortByNumeric: 1}
                 }
@@ -132,13 +149,14 @@ qsocks.ConnectOpenApp(config).then(function(connections) {
 		}
 	}).then(function(prodModel){
 		prodModel.getLayout().then(function(layout) {
-			// console.log("got app layout",JSON.stringify(layout));
+			// console.log("got prodModel layout",JSON.stringify(layout));
             var qMatrix = layout.qHyperCube.qDataPages[0].qMatrix;
-            // console.log("data",JSON.stringify(qMatrix));
+            // console.log("prodModel",JSON.stringify(qMatrix));
+            // console.log("size of prodModel: " + qMatrix.length);
             for(i=0; i<qMatrix.length; i++){
 	            p = qMatrix[i][0].qText;
 	            a = qMatrix[i][1].qText;
-	            s = qMatrix[i][2].qNum;
+	            iv = qMatrix[i][2].qNum;
 
                 if(!(Products.hasOwnProperty(p))){
                 	Products[p] = {};
@@ -150,7 +168,7 @@ qsocks.ConnectOpenApp(config).then(function(connections) {
                 	Products[p].affinities.push(a);
                 }
 
-                Products[p].sales = s;
+                Products[p].inventory = iv;
             }
             console.log("got " + Object.keys(Products).length + " Products");
         });
@@ -164,7 +182,7 @@ qsocks.ConnectOpenApp(config).then(function(connections) {
 	            for(i=0; i<qMatrix.length; i++){
 		            p = qMatrix[i][0].qText;
 		            a = qMatrix[i][1].qText;
-		            s = qMatrix[i][2].qNum;
+		            iv = qMatrix[i][2].qNum;
 
 	                if(!(Products.hasOwnProperty(p))){
 	                	Products[p] = {};
@@ -176,9 +194,83 @@ qsocks.ConnectOpenApp(config).then(function(connections) {
 	                	Products[p].affinities.push(a);
 	                }
 
-	                Products[p].sales = s;
+	                Products[p].inventory = iv;
 	            }
 	            console.log("Cube updated. Now " + Object.keys(Products).length + " Products");
+	        });
+        });
+	});
+
+	// SalesData Cube
+    senseApp.createSessionObject({
+        "qInfo": {
+            "qType": 'mySalesDates'
+        },
+        "qHyperCubeDef": {
+			"qInitialDataFetch": [
+				{
+					"qHeight": 5000,
+					"qWidth": 2
+				}
+			],
+			"qDimensions": [
+				{
+					"qDef" : {
+						"qFieldDefs" : ["Date"]
+					}
+				}
+			],
+			"qMeasures": [
+                {
+                    qDef: {
+                        qLabel: 'Sales',
+                        qDef: '=Sum(QuarterSales)'
+                    },
+                    qSortBy: {qSortByNumeric: 1}
+                }
+			],
+			// "qSuppressZero": false,
+			"qSuppressMissing": true,
+			// "qMode": "S",
+			// "qInterColumnSortOrder": [],
+			"qStateName": "$"
+		}
+	}).then(function(salesModel){
+		salesModel.getLayout().then(function(layout) {
+			// console.log("got salesModel layout",JSON.stringify(layout));
+            var qMatrix = layout.qHyperCube.qDataPages[0].qMatrix;
+            // console.log("salesModel",JSON.stringify(qMatrix));
+            for(i=0; i<qMatrix.length; i++){
+	            d = qMatrix[i][0].qText;
+	            s = qMatrix[i][1].qNum;
+
+                if(!(SalesDates.hasOwnProperty(d))){
+                	SalesDates[d] = {};
+                }
+
+                SalesDates[d].sales = s;
+            }
+            console.log("got " + Object.keys(SalesDates).length + " SalesDates");
+            console.log("SalesDates", SalesDates);
+        });
+
+        salesModel.on('change', function(layout) {
+        	salesModel.getLayout().then(function(layout) {
+				// console.log("got new data",JSON.stringify(layout));
+	            var qMatrix = layout.qHyperCube.qDataPages[0].qMatrix;
+	            // console.log("data",JSON.stringify(qMatrix));
+	            SalesDates = {};
+	            for(i=0; i<qMatrix.length; i++){
+		            d = qMatrix[i][0].qText;
+		            s = qMatrix[i][1].qNum;
+
+	                if(!(SalesDates.hasOwnProperty(d))){
+	                	SalesDates[d] = {};
+	                }
+
+	                SalesDates[d].sales = s;
+	            }
+	            console.log("Cube updated. Now " + Object.keys(SalesDates).length + " SalesDates");
 	        });
         });
 	});
@@ -216,17 +308,17 @@ qsocks.ConnectOpenApp(config).then(function(connections) {
 				"qStateName": "$",
 				"qLibraryId": "",
 				"qDef": {
-					"qFieldDefs" : ["Shelf Location"],
+					"qFieldDefs" : ["Product Name"],
 					"qSortCriterias": [{
 						"qSortByAscii": -1
 					}],
-					"qFieldLabels": ["Shelf Location"]
+					"qFieldLabels": ["Product Name"]
 				},
 				"qInitialDataFetch": [
 	                {
 	                    "qTop": 0,
 	                    "qLeft": 0,
-	                    "qHeight": 10,
+	                    "qHeight": 100,
 	                    "qWidth": 2,
 	                }
 	            ],
@@ -239,14 +331,14 @@ qsocks.ConnectOpenApp(config).then(function(connections) {
 		list.getLayout().then(function(layout) {
             var qMatrix = layout.ListObject1.qListObject.qDataPages[0].qMatrix;
             for(i=0; i<qMatrix.length; i++){
-	            console.log(qMatrix[i][0].qText, qMatrix[i][0].qState);
+	            console.log("Shelf Number: ", qMatrix[i][0].qText, qMatrix[i][0].qState);
 	            fields.ShelfNum[qMatrix[i][0].qText] = qMatrix[i][0].qState;
 			}
 
             var qMatrix = layout.ListObject2.qListObject.qDataPages[0].qMatrix;
             for(i=0; i<qMatrix.length; i++){
-	            console.log(qMatrix[i][0].qText, qMatrix[i][0].qState);
-	            fields.ShelfLoc[qMatrix[i][0].qText] = qMatrix[i][0].qState;
+	            console.log("Product Name: ", qMatrix[i][0].qText, qMatrix[i][0].qState);
+	            fields.ProductName[qMatrix[i][0].qText] = qMatrix[i][0].qState;
             }
 
         });
@@ -259,10 +351,10 @@ qsocks.ConnectOpenApp(config).then(function(connections) {
 		            fields.ShelfNum[qMatrix[i][0].qText] = qMatrix[i][0].qState;
 	            }
 
-				console.log("Shelf Location",layout.ListObject2.qListObject.qDimensionInfo.qStateCounts.qExcluded);
+				console.log("Product Name",layout.ListObject2.qListObject.qDimensionInfo.qStateCounts.qExcluded);
 	            var qMatrix = layout.ListObject2.qListObject.qDataPages[0].qMatrix;
 	            for(i=0; i<qMatrix.length; i++){
-		            fields.ShelfLoc[qMatrix[i][0].qText] = qMatrix[i][0].qState;
+		            fields.ProductName[qMatrix[i][0].qText] = qMatrix[i][0].qState;
 	            }
 	        });
         });
